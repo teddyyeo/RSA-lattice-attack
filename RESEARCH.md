@@ -39,9 +39,12 @@ problem geometry (230-bit x0 window at bit 600, 155-bit x1 window at bit 265,
    2²³⁰) to the exact `(x0,x1)`. **~5–10 s, blind**, general across `m`.
    Implemented in `crt_groebner_recover`.
 
-5. **Per-candidate ≈ 0.37 h** (flatter-dominated; recovery negligible). Real
-   256-way run on 4 single-threaded workers: **~24 h worst, ~12 h expected**
-   (early exit) — down from the original ~10 days.
+5. **Per-candidate ≈ 0.37 h**, or **≈0.09 h (330 s) with the focus-group row
+   trim** (`FOCUS_TRIM=4`, §7/§11): drop the top 4 total-degree shells of shift
+   rows (190→120 rows) for a **2.5×** flatter speedup, recovery unchanged on 3
+   seeds; sharp cliff at the 5th shell. Real 256-way run on 4 single-threaded
+   workers: **~24 h worst / ~12 h expected** untrimmed → **~6 h with the trim**
+   (early exit) — down from the original ~10 days. Baked into `arm_focus.sage`.
 
 6. **`flatter` mandatory** (built N1-native, `-mcpu=neoverse-n1`); `WORKERS=4`
    single-threaded (`OMP=1`, `MALLOC_ARENA_MAX=2`); `FEASIBILITY_GATE=0` — the
@@ -232,11 +235,14 @@ pruning signals, not just final solvers.
 The way to buy back the 4-core budget is smaller/smarter lattices at the same
 strength, not bigger ones.
 
-1. **Focus-group row selection** (Miller–Narayanan–Venkatesan). Coppersmith
-   lattices carry many rows that satisfy the determinant story but never appear
-   in a reduced vector that vanishes at the root. Learn the productive
-   sublattice on smaller synthetic instances (heatmap over shift params
-   `(k, a, b)`), keep the hot rows, drop cold ones → lower effective dimension.
+1. **Focus-group row selection** (Miller–Narayanan–Venkatesan). ✅ **DONE — see
+   §11 `FOCUS_TRIM`.** Coppersmith lattices carry many rows that satisfy the
+   determinant story but never appear in a reduced vector that vanishes at the
+   root. We recovered the exact transform `U` and found the cold rows are the top
+   total-degree shells; dropping the top 4 shells (`k+i>m−4`) at (18,5) cut
+   flatter **2.5×** (826→330 s, 190→120 rows) with recovery unchanged on 3 seeds.
+   The keep-set is structural (instance-independent), so learn once / reuse for
+   all candidates. Cliff is sharp: a 5th shell collapses the lattice.
 
 2. **Asymmetric shift shape** (Bloemer–May, Jochemsz–May, Coron). The current
    `x1`-only family is a baseline, not sacred. Try a weighted-degree family
@@ -361,9 +367,36 @@ of the root), **~5–10 s**, general across `m`. Guarded by a 150 s SIGALRM per
 candidate so wrong brute-force guesses (255/256) fail fast. Unscaling to poly
 coefficients is a modular inverse of `X^a Y^b`, cheap mod p.
 
+### Focus-group row trim (`FOCUS_TRIM`) — §7 lever, now measured
+Recovering the exact unimodular transform `U` (`U·B_orig = B_red`, 190×190,
+integral, 185 s) for the (18,5) reduced basis shows **16 of 190 original shift
+rows are never used by any of the 144 root-vanishing reduced vectors**, and they
+form a clean structural cluster: the high-`k`/high-total-degree corner. Peeling
+shift rows by total-degree shell (`k+i > m − FOCUS_TRIM`) while keeping the full
+`m`-degree monomial columns gives a **sharp cliff** — same-machine A/B, blind CRT
+recovery each time:
+
+| rule | dim | flatter | vs full | recover |
+|---|---|---|---|---|
+| full | 190 | 825.9 s | — | ✅ |
+| `k+i≤16` | 153 | 573.8 s | −30% | ✅ |
+| `k+i≤15` | 136 | 454.3 s | −45% | ✅ |
+| **`k+i≤14`** (FOCUS_TRIM=4) | **120** | **330 s** | **−60%** | ✅ (seeds 12345/7/99) |
+| `k+i≤13` | 105 | 71 s | — | ❌ collapses |
+
+So drop **70/190 rows (37%)** → flatter **~2.5×** faster, recovery unchanged and
+still blind; the 5th shell kills it. Key point: this is *not* lowering `m` — the
+monomial space stays `m=18` (190 cols) while only shift **degree** drops to 14
+(shift/monomial-degree decoupling). Contribution is bimodal (each row used by ≤1
+or ≥14 vanishing vectors, nothing between), which is why the cliff is knife-edge.
+The keep-set is a list of `(k,i)` indices → **structural, instance-independent**
+(seed-12345 keep-set recovers seed-7): learn once, reuse across all 256
+candidates. Baked into `arm_focus.sage` as `FOCUS_TRIM` (default 4).
+
 ### Operational
 - `flatter` built `-mcpu=neoverse-n1`, on PATH, visible to Sage.
-- Per-candidate ≈ 0.37 h; real 256-way run ~12–24 h on 4 workers, checkpointed.
+- Per-candidate ≈ 0.37 h untrimmed / **≈0.09 h (330 s) with FOCUS_TRIM=4**; real
+  256-way run ~12–24 h untrimmed → **~6 h trimmed** on 4 workers, checkpointed.
 - Memory: fine (per-worker ~1–2 GB, no swap needed at m≤30).
 - Note: concurrent flatter workers do **not** materially slow each other
   (measured: 3 parallel (18,5) all ~0.37 h), but naive Python rational
