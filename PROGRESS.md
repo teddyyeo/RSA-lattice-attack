@@ -181,3 +181,44 @@ polynomials), which could make a real difference at this scale. Concretely:
   proper background-execution flag, not manual shell `&`/`nohup` — the
   latter got reaped when its originating tool call returned, once, silently
   wasting ~10 minutes of compute.
+
+---
+
+## 8. Epilogue — solved (the 5-variable model was abandoned)
+
+The §-above "unsolved" status refers to the **5-variable** investigation only.
+That path was dropped. The problem was ultimately solved with a **2-variable
+relaxed model** (brute-force the two 4-bit gaps, then Herrmann–May on two
+blocks split by the K180 run) plus three optimizations: reduced-mod-`Nᵗ`
+lattice entries, an empirically-calibrated `(m,t)=(18,5)` (vs the determinant
+gate's `(24,7)`), and blind CRT small-prime Gröbner root recovery. See
+`RESEARCH.md` (decision record + measured numbers), `arm.sage` /
+`arm_focus.sage` (solver), and `found_result_arm.txt`. Flag:
+`FLAG{d1rty_b1t_l34k_c0pp3rsm1th_m33ts_str4t3gy}`.
+
+### 8.1 Cross-hardware benchmark of the improved solver (2026-07-17)
+
+Reproduced the full attack end-to-end with the focus-trim build
+(`arm_focus.sage`, 190→120 lattice rows, ~2.5× faster flatter) on a different
+machine, building the whole toolchain from scratch.
+
+- **Host:** Intel Core Ultra 7 255H (16 threads, hybrid P/E cores), 15.4 GB
+  RAM, Windows 11.
+- **Env:** WSL2 Ubuntu 26.04 (11 GB / 16 CPU / 4 GB swap to WSL); SageMath 10.9
+  via conda-forge (Ubuntu 26.04 has no sagemath apt package and its Python 3.14
+  is too new for passagemath wheels); flatter built from source with
+  `-O3 -march=native` (x86, not `neoverse-n1`).
+- **Config:** `WORKERS=14 REDUCTION=flatter` `arm_focus.sage`, `FOCUS_TRIM=4`,
+  params `(18,5)`.
+
+| metric | ARM 4-core (original) | x86 16-thread (this run) |
+|---|---|---|
+| per-candidate, single core | 330 s | **113 s** (~2.9× faster) |
+| 14-wide wave (14 candidates) | — | **241.5 s** (~2.1× single-core, E-core/contention) |
+| winning candidate (idx 155) | — | 254.1 s |
+| **full attack to flag** | ~14 h | **~50 min (2994 s)** |
+
+Factor found at candidate **idx 155** (`high_guess=0x9`, `low_guess=0xb`),
+`p*q == N` True, flag reproduced. 156/256 candidates processed before early
+exit; never needed the `(20,6)` fallback. Peak RSS ~5.8 GB, zero swap — 14
+workers fit comfortably in 11 GB. The improved script ran unmodified.
